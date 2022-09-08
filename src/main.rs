@@ -7,9 +7,10 @@ extern crate ticker;
 extern crate tokio;
 
 use bitcoin::schnorr::TweakedPublicKey;
-use bitcoincore_rpc::{Auth, Client, RpcApi};
-use std::time::Duration;
-use ticker::Ticker;
+//use bitcoincore_rpc::{Auth, Client, RpcApi};
+use bitcoincore_rpc::{ RpcApi};
+//use std::time::Duration;
+//use ticker::Ticker;
 
 use warp::Filter;
 
@@ -95,6 +96,7 @@ async fn main() {
 */ 
 }
 
+#[allow(dead_code)]
 fn scan_transaction(tx: &bitcoincore_rpc::bitcoin::Txid, rpc: &bitcoincore_rpc::Client) {
     let raw_transaction_hex = rpc.get_raw_transaction_hex(&tx, None).unwrap();
     let args = [
@@ -110,6 +112,7 @@ fn scan_transaction(tx: &bitcoincore_rpc::bitcoin::Txid, rpc: &bitcoincore_rpc::
     }
 }
 
+#[allow(dead_code)]
 fn generate_address() -> String {
     println!("generate_address()");
 
@@ -158,55 +161,62 @@ fn generate_address() -> String {
 
 
 fn generate_taproot_address() -> String {
+    //https://github.com/bitcoin/bips/blob/master/bip-0086.mediawiki
 
-    println!("generate_taproot_address()");
+    println!("-------------- generate_taproot_address() -----------------");
 
     let network = bitcoin::Network::Bitcoin;
     println!("Network: {:?}", network);
 
-    // Generates an English mnemonic with 12 words randomly
-    let mnemonic = Mnemonic::generate(Count::Words12);
-    // Gets the phrase
-    let _phrase = mnemonic.phrase();
+    // // Generates an English mnemonic with 12 words randomly
+    // let mnemonic = Mnemonic::generate(Count::Words12);
+    // // Gets the phrase
+    // let _phrase = mnemonic.phrase();
 
-    println!("Phrase generated: {}", _phrase);
+    // println!("Phrase generated: {}", _phrase);
+
+    let mnemonic_phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
+    let mnemonic = Mnemonic::from_phrase(mnemonic_phrase).unwrap();
 
     // Generates the HD wallet seed from the mnemonic and the passphrase.
     let seed = mnemonic.to_seed("");
 
     // calculate root key from seed
-    let root = ExtendedPrivKey::new_master(network, &seed).unwrap();
-    println!("Root key: {}", root);
+    let rootpriv = ExtendedPrivKey::new_master(network, &seed).unwrap();
+    println!("rootpriv: {}", rootpriv);
 
     // we need secp256k1 context for key derivation
     let mut buf: Vec<AlignedType> = Vec::new();
     buf.resize(Secp256k1::preallocate_size(), AlignedType::zeroed());
     let secp = Secp256k1::preallocated_new(buf.as_mut_slice()).unwrap();
 
-    // derive child xpub
-    let path = DerivationPath::from_str("m/84h/0h/0h").unwrap();
-    let child = root.derive_priv(&secp, &path).unwrap();
-    println!("Child at {}: {}", path, child);
 
-    let xpub = ExtendedPubKey::from_priv(&secp, &child);
-    println!("Public key at {}: {}", path, xpub);
+    let rootpub  = ExtendedPubKey::from_priv(&secp, &rootpriv);
+    println!("rootpub: {}", rootpub);
+
+    // Account 0, root = m/86'/0'/0'
+    let path = DerivationPath::from_str("m/86h/0h/0h").unwrap();
+    let account0_xprv = rootpriv.derive_priv(&secp, &path).unwrap();
+    println!("Account0_xprv at {}: {}", path, account0_xprv);
+    let account0_xpub = ExtendedPubKey::from_priv(&secp, &account0_xprv);
+    println!("Account0_xpub at {}: {}", path, account0_xpub);
 
     // generate first receiving address at m/0/0
     // manually creating indexes this time
     let zero = ChildNumber::from_normal_idx(0).unwrap();
-    let public_key = xpub
+    let public_key = account0_xpub
         .derive_pub(&secp, &vec![zero, zero])
-        .unwrap()
-        .public_key;
-
+        .unwrap();
     println!("Public_key idx_0 : {}", public_key);
 
 
+    let private_key = account0_xprv.derive_priv(&secp, &vec![zero, zero] ).unwrap();
+    println!("private_key idx_0 : {}", private_key);
 
-
-    let xonly_pubkey = XOnlyPublicKey::from(public_key);
-    let tweaked_pubkey = TweakedPublicKey::dangerous_assume_tweaked(xonly_pubkey);
-    let address = Address::p2tr_tweaked(tweaked_pubkey, network);
+    let internal_key = XOnlyPublicKey::from(public_key.public_key);
+    println!("internal_key idx_0 : {}", internal_key);
+    let secp = Secp256k1::verification_only();
+    let address = Address::p2tr(&secp, internal_key, None, network);
 
     println!("First receiving address: {}", address);
 
