@@ -6,6 +6,7 @@ extern crate serde_json;
 extern crate ticker;
 extern crate tokio;
 
+use bitcoin::schnorr::TweakedPublicKey;
 use bitcoincore_rpc::{Auth, Client, RpcApi};
 use std::time::Duration;
 use ticker::Ticker;
@@ -20,6 +21,7 @@ use bitcoin::secp256k1::Secp256k1;
 use bitcoin::util::bip32::{ChildNumber, DerivationPath, ExtendedPrivKey, ExtendedPubKey};
 use bitcoin::Address;
 use bitcoin::PublicKey;
+use bitcoin::XOnlyPublicKey;
 
 pub struct WebServer;
 
@@ -42,14 +44,23 @@ async fn main() {
     env_logger::init();
 
     // run webserver
-    let tr = tokio::runtime::Runtime::new().unwrap();
-    tr.spawn(async {
-        WebServer::run().await;
-    });
-    println!("Everything working good!");
+    // let tr = tokio::runtime::Runtime::new().unwrap();
+    // tr.spawn(async {
+    //     WebServer::run().await;
+    // });
+    // println!("Everything working good!");
 
+    // let ticker = Ticker::new(0.., Duration::from_secs(5));
+
+    // for _ in ticker {
+    //     println!("Work !!!");
+    // }
+
+    generate_taproot_address();
+
+/*    
     let rpc = Client::new(
-        "http://127.0.0.1:10003",
+        "http://10.60.9.67:10003",
         Auth::UserPass("user".to_string(), "user".to_string()),
     )
     .unwrap();
@@ -81,6 +92,7 @@ async fn main() {
             println!("No more blocks");
         }
     }
+*/ 
 }
 
 fn scan_transaction(tx: &bitcoincore_rpc::bitcoin::Txid, rpc: &bitcoincore_rpc::Client) {
@@ -99,7 +111,10 @@ fn scan_transaction(tx: &bitcoincore_rpc::bitcoin::Txid, rpc: &bitcoincore_rpc::
 }
 
 fn generate_address() -> String {
+    println!("generate_address()");
+
     let network = bitcoin::Network::Bitcoin;
+    println!("Network: {:?}", network);
 
     // Generates an English mnemonic with 12 words randomly
     let mnemonic = Mnemonic::generate(Count::Words12);
@@ -139,4 +154,62 @@ fn generate_address() -> String {
     println!("First receiving address: {}", address);
 
     return address.to_string();
+}
+
+
+fn generate_taproot_address() -> String {
+
+    println!("generate_taproot_address()");
+
+    let network = bitcoin::Network::Bitcoin;
+    println!("Network: {:?}", network);
+
+    // Generates an English mnemonic with 12 words randomly
+    let mnemonic = Mnemonic::generate(Count::Words12);
+    // Gets the phrase
+    let _phrase = mnemonic.phrase();
+
+    println!("Phrase generated: {}", _phrase);
+
+    // Generates the HD wallet seed from the mnemonic and the passphrase.
+    let seed = mnemonic.to_seed("");
+
+    // calculate root key from seed
+    let root = ExtendedPrivKey::new_master(network, &seed).unwrap();
+    println!("Root key: {}", root);
+
+    // we need secp256k1 context for key derivation
+    let mut buf: Vec<AlignedType> = Vec::new();
+    buf.resize(Secp256k1::preallocate_size(), AlignedType::zeroed());
+    let secp = Secp256k1::preallocated_new(buf.as_mut_slice()).unwrap();
+
+    // derive child xpub
+    let path = DerivationPath::from_str("m/84h/0h/0h").unwrap();
+    let child = root.derive_priv(&secp, &path).unwrap();
+    println!("Child at {}: {}", path, child);
+
+    let xpub = ExtendedPubKey::from_priv(&secp, &child);
+    println!("Public key at {}: {}", path, xpub);
+
+    // generate first receiving address at m/0/0
+    // manually creating indexes this time
+    let zero = ChildNumber::from_normal_idx(0).unwrap();
+    let public_key = xpub
+        .derive_pub(&secp, &vec![zero, zero])
+        .unwrap()
+        .public_key;
+
+    println!("Public_key idx_0 : {}", public_key);
+
+
+
+
+    let xonly_pubkey = XOnlyPublicKey::from(public_key);
+    let tweaked_pubkey = TweakedPublicKey::dangerous_assume_tweaked(xonly_pubkey);
+    let address = Address::p2tr_tweaked(tweaked_pubkey, network);
+
+    println!("First receiving address: {}", address);
+
+
+    return "".to_string();
 }
